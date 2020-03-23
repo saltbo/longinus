@@ -1,46 +1,34 @@
+use std::thread;
 use crate::session::{ServerSession, RequestHeader};
 use crate::validator::TimedUserValidator;
 
+use std::sync::{Mutex, Arc};
+use std::time::Duration;
+
 
 pub struct Vmess {
-    clients: TimedUserValidator
+    clients: Arc<Mutex<TimedUserValidator>>
 }
 
 impl Vmess {
     pub fn new() -> Vmess {
-        let validator = TimedUserValidator::new();
+        let validator = Arc::new(Mutex::new(TimedUserValidator::new()));
+
+        let sv = validator.clone();
+        thread::spawn(move || {
+            loop {
+                sv.lock().unwrap().update_user_hash();
+
+                thread::sleep(Duration::from_secs(10))
+            }
+        });
 
         Vmess {
             clients: validator
         }
     }
-    pub fn update_userhash(&mut self, user_id: [u8; 16]) {
-        // println!("1111: {:?}", user_id);
-        //
-        // let time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-        // let end_sec = time + 120;
-        // let mut begin_sec = time - 120;
-        //
-        // println!("time begin: {:?}, time end: {:?}", begin_sec, end_sec);
-        // while begin_sec != end_sec {
-        //     begin_sec = begin_sec + 1;
-        //
-        //     let mut auth_hash = [0; 16];
-        //     let mut hmac = crypto::hmac::Hmac::new(crypto::md5::Md5::new(), &user_id);
-        //     hmac.input(&begin_sec.to_be_bytes());
-        //     hmac.raw_result(&mut auth_hash);
-        //
-        //     let it = indexTimePair { time: begin_sec };
-        //     // println!("{:?}: {:?}", it.time, hex::encode(auth_hash));
-        //     self.user_hash.insert(auth_hash, it);
-        // }
 
-        // for (key, value) in self.user_hash {
-        //     println!("{:?}: {:?}", key, value.time);
-        // }
-    }
-
-    pub fn decode_header(&self, user_id: [u8; 16], h: bytes::Bytes) {
+    pub fn decode_header(&self, h: bytes::Bytes) {
         let mut srv_session = ServerSession::new(&self.clients);
         let request = srv_session.decode_request_header(h);
         if request.is_err() {
@@ -48,9 +36,6 @@ impl Vmess {
             return;
         }
         let req = request.ok();
-
-
-
     }
 
     pub fn encrypt() {

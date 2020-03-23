@@ -34,6 +34,7 @@ struct MyWebSocket {
     /// Client must send ping at least once per 10 seconds (CLIENT_TIMEOUT),
     /// otherwise we drop connection.
     hb: Instant,
+    vmess: Vmess,
 }
 
 impl Actor for MyWebSocket {
@@ -64,10 +65,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for MyWebSocket {
             }
             Ok(ws::Message::Text(text)) => ctx.text(text),
             Ok(ws::Message::Binary(bin)) => {
-                let user_id = vmess::parse_uid("f2d17495-9d26-4463-80c1-d8d079dee963").unwrap();
-                let mut v = Vmess::new();
-                v.update_userhash(user_id);
-                v.decode_header(user_id, bin);
+                self.vmess.decode_header(bin);
 
                 // println!("{:?}", body);
                 // let mut stream = TcpStream::connect("39.96.250.224:80").expect("Could not connect to server");
@@ -96,7 +94,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for MyWebSocket {
 
 impl MyWebSocket {
     fn new() -> Self {
-        Self { hb: Instant::now() }
+        Self { hb: Instant::now(), vmess: Vmess::new() }
     }
 
     /// helper method that sends ping to client every second.

@@ -1,6 +1,7 @@
 use crypto::digest::Digest;
 use crypto::symmetriccipher::BlockEncryptor;
 
+use std::sync::{Mutex, Arc};
 use crate::validator::{TimedUserValidator, MemoryUser};
 
 // md5
@@ -20,7 +21,7 @@ const REQ_CMD_TCP: RequestCommand = 0x01;
 const REQ_CMD_UDP: RequestCommand = 0x02;
 const REQ_CMD_MUX: RequestCommand = 0x03;
 
-
+#[derive(Debug)]
 pub struct RequestHeader {
     version: u8,
     pub command: RequestCommand,
@@ -33,7 +34,7 @@ pub struct RequestHeader {
 
 
 pub struct ServerSession<'a> {
-    user_validator: &'a TimedUserValidator,
+    user_validator: &'a Arc<Mutex<TimedUserValidator>>,
     // sessionHistory:  *SessionHistory
     request_body_key: [u8; 16],
     request_body_iv: [u8; 16],
@@ -44,7 +45,7 @@ pub struct ServerSession<'a> {
 }
 
 impl<'a> ServerSession<'a> {
-    pub fn new(validator: &'a TimedUserValidator) -> Self {
+    pub fn new(validator: &'a Arc<Mutex<TimedUserValidator>>) -> Self {
         ServerSession {
             user_validator: validator,
             request_body_key: [0; 16],
@@ -61,9 +62,9 @@ impl<'a> ServerSession<'a> {
         key.copy_from_slice(&hash);
         println!("{:?}", key);
 
-        let (user, timestamp) = match self.user_validator.get(key) {
+        let (user, timestamp) = match self.user_validator.lock().unwrap().get(key) {
             None => return Err("invalid user"),
-            Some((mem_user, timestamp)) => (mem_user, timestamp),
+            Some((mem_user, timestamp)) => (*mem_user, timestamp),
         };
         println!("Successful logon!");
 
@@ -71,7 +72,6 @@ impl<'a> ServerSession<'a> {
         let user_id = user.id().to_vec();
         let header_iv = md5!(&time, &time, &time, &time);
         let header_key = md5!(&user_id, b"c48619fe-8f02-49e0-b9e9-edf763e17e21");
-
         let mut aescfb = AES128CFB::new(header_key, header_iv);
 
         let mut decryptor = h.slice(16..58).to_vec();
@@ -80,20 +80,22 @@ impl<'a> ServerSession<'a> {
         println!("plain: {:?}", decryptor);
 
         let mut request = RequestHeader {
-            version: *decryptor.get(1).unwrap(),
+            version: *decryptor.get(0).unwrap(),
             command: REQ_CMD_TCP,
             option: 0,
             security: 0,
             port: 0,
         };
-        self.request_body_iv.copy_from_slice(decryptor.get(1..16).unwrap());
-        self.request_body_key.copy_from_slice(decryptor.get(16..34).unwrap());
+        self.request_body_iv.copy_from_slice(decryptor.get(1..17).unwrap());
+        self.request_body_key.copy_from_slice(decryptor.get(17..33).unwrap());
 
         request.option = *decryptor.get(34).unwrap();
         let padding_len = decryptor.get(35).unwrap() >> 4;
 
-        // request.Security = *decryptor.get(35).unwrap() & 0x0F;
+        request.security = (*decryptor.get(35).unwrap() & 0x0F) as i32;
         request.command = RequestCommand::from(*decryptor.get(37).unwrap());
+
+        println!("{:?}", request);
         match request.command {
             REQ_CMD_MUX => {
                 // request.Address = net.DomainAddress("v1.mux.cool");
