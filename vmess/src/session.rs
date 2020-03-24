@@ -3,6 +3,8 @@ use crypto::symmetriccipher::BlockEncryptor;
 
 use std::sync::{Mutex, Arc};
 use crate::validator::{TimedUserValidator, MemoryUser};
+use std::io::{BufReader, BufRead, Read};
+use bytes::buf::ext::Reader;
 
 // md5
 macro_rules! md5 {
@@ -56,10 +58,19 @@ impl<'a> ServerSession<'a> {
         }
     }
 
-    pub fn decode_request_header(&mut self, h: bytes::Bytes) -> Result<RequestHeader, &str> {
+    pub fn decrypt(&self, reader: &mut Reader<bytes::Bytes>, aescfb: &mut AES128CFB, buf_len: u64) -> Vec<u8> {
+        println!("---decrypt---");
+        let mut buf = Vec::new();
+        reader.take(buf_len).read_to_end(&mut buf);
+        println!("raw: {:?}", buf);
+        aescfb.decode(&mut buf);
+        println!("plain: {:?}", buf);
+        return buf;
+    }
+
+    pub fn decode_request_header(&mut self, reader: &mut Reader<bytes::Bytes>) -> Result<RequestHeader, &str> {
         let mut key: [u8; 16] = [0; 16];
-        let hash = h.slice(0..16).to_vec();
-        key.copy_from_slice(&hash);
+        reader.read(&mut key);
         println!("{:?}", key);
 
         let (user, timestamp) = match self.user_validator.lock().unwrap().get(key) {
@@ -73,11 +84,7 @@ impl<'a> ServerSession<'a> {
         let header_iv = md5!(&time, &time, &time, &time);
         let header_key = md5!(&user_id, b"c48619fe-8f02-49e0-b9e9-edf763e17e21");
         let mut aescfb = AES128CFB::new(header_key, header_iv);
-
-        let mut decryptor = h.slice(16..58).to_vec();
-        println!("raw: {:?}", decryptor);
-        aescfb.decode(&mut decryptor);
-        println!("plain: {:?}", decryptor);
+        let decryptor = self.decrypt(reader, &mut aescfb, 42);
 
         let mut request = RequestHeader {
             version: *decryptor.get(0).unwrap(),
@@ -90,48 +97,54 @@ impl<'a> ServerSession<'a> {
         self.request_body_key.copy_from_slice(decryptor.get(17..33).unwrap());
 
         request.option = *decryptor.get(34).unwrap();
-        let padding_len = decryptor.get(35).unwrap() >> 4;
-
+        let padding_len = decryptor.get(35).unwrap() >> 4 as i32;
         request.security = (*decryptor.get(35).unwrap() & 0x0F) as i32;
         request.command = RequestCommand::from(*decryptor.get(37).unwrap());
-
-        println!("{:?}", request);
         match request.command {
             REQ_CMD_MUX => {
                 // request.Address = net.DomainAddress("v1.mux.cool");
-                request.port = 80
+                request.port = 0
             }
             REQ_CMD_TCP | REQ_CMD_UDP => {
                 // addrParser.ReadAddressPort(buffer, decryptor)
             }
             _ => {}
         }
+        request.port = *decryptor.get(39).unwrap() as u16;
+        println!("{:?}", request);
+        let port_type = *decryptor.get(40).unwrap();
+        println!("{:?}", port_type);
 
-        // let addr_len: &u8 = decryptor.get(41).unwrap();
-        // println!("{:?}", addr_len);
-        //
+        let addr_len = *decryptor.get(41).unwrap() as u64;
+        println!("{:?}", addr_len);
+
+        let addr = self.decrypt(reader, &mut aescfb, addr_len);
+        println!("addr: {:?}", addr);
+
+        if padding_len > 0 {
+            self.decrypt(reader, &mut aescfb, padding_len as u64);
+        }
+
+        let expectedHash = self.decrypt(reader, &mut aescfb, 4);
+        println!("expectedHash: {:?}", expectedHash);
+
         // let actualHash = "";
         // let expectedHash = decryptor.get(58 + *addr_len + padding_len..58 + *addr_len + padding_len + 4);
         // if actualHash != expectedHash {
         //     return Err("invalid auth");
         // }
-
+        //
         Ok(request)
     }
 
-    pub fn decode_request_body(&self) {
-        // let remain_offset = (58 + *addr_len + p + 4 as u8) as usize;
-        // println!("{:?}", remain_offset);
-        //
-        // let mut decryptor = h.slice(58..remain_offset).to_vec();
-        // println!("raw: {:?}", decryptor);
-        // aescfb.decode(&mut decryptor);
-        // println!("plain: {:?}", decryptor);
-        //
-        // println!("{:?}", h.slice(remain_offset - 5..remain_offset + 5).to_vec());
-        // // let dlen = h.slice(remain_offset..remain_offset+2).get_u8();
-        // let data = h.slice(remain_offset + 2..);
-        // println!("len: {:?}, data: {:?}", data.len(), data);
+    pub fn decode_request_body(&self, reader: &mut Reader<bytes::Bytes>) -> Vec<u8> {
+        let mut len: Vec<u8> = Vec::with_capacity(2);
+        reader.take(2).read_to_end(&mut len);
+
+        let mut buf = Vec::new();
+        reader.read_to_end(&mut buf);
+        println!("len: {:?}, data: {:?}", buf.len(), String::from_utf8_lossy(buf.as_slice()));
+        return buf;
     }
 }
 

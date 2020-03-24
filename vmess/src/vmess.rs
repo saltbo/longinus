@@ -4,6 +4,8 @@ use crate::validator::TimedUserValidator;
 
 use std::sync::{Mutex, Arc};
 use std::time::Duration;
+use std::io::BufReader;
+use bytes::buf::ext::Reader;
 
 
 pub struct Vmess {
@@ -28,14 +30,16 @@ impl Vmess {
         }
     }
 
-    pub fn decode_header(&self, h: bytes::Bytes) {
+    pub fn decode(&self, mut reader: Reader<bytes::Bytes>) {
         let mut srv_session = ServerSession::new(&self.clients);
-        let request = srv_session.decode_request_header(h);
+        let request = srv_session.decode_request_header(&mut reader);
         if request.is_err() {
             println!("err: {:?}", request.err().unwrap());
             return;
         }
         let req = request.ok();
+
+        let body = srv_session.decode_request_body(&mut reader);
     }
 
     pub fn encrypt() {

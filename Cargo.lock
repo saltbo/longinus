@@ -1144,6 +1144,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "oh-my-rust"
+version = "0.4.0"
+source = "git+https://github.com/ylxdzsw/oh-my-rust#7afebd4fb09f336bfc614cbc4009816d2ecd229a"
+
+[[package]]
 name = "openssl"
 version = "0.10.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1776,6 +1781,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "hex",
+ "oh-my-rust",
  "rust-crypto",
 ]
 

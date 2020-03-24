@@ -28,13 +28,11 @@ pub struct User {
     last_sec: i64,
 }
 
-#[derive(Clone, Copy)]
 pub struct IndexTimePair {
     user: User,
     time_inc: u64,
 }
 
-// #[derive(Send, Sync)]
 pub struct TimedUserValidator {
     users: Vec<User>,
     user_hash: HashMap<[u8; 16], IndexTimePair>,
@@ -51,8 +49,6 @@ impl TimedUserValidator {
     }
 
     fn generate_new_hashes(&mut self, user: User) {
-        println!("1111: {:?}", user.user.account.id);
-
         let time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
         let end_sec = time + 120;
         let mut begin_sec = time - 120;

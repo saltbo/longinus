@@ -9,7 +9,9 @@ use actix_web::client::Client;
 use std::thread;
 use vmess::Vmess;
 use std::net::TcpStream;
-use std::io::{Write, BufReader, BufRead, Read};
+use std::io::{Write, BufReader, BufRead, Read, Take};
+use bytes::Bytes;
+use bytes::buf::BufExt;
 
 extern crate timer;
 extern crate chrono;
@@ -65,7 +67,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for MyWebSocket {
             }
             Ok(ws::Message::Text(text)) => ctx.text(text),
             Ok(ws::Message::Binary(bin)) => {
-                self.vmess.decode_header(bin);
+                self.vmess.decode(bin.reader());
 
                 // println!("{:?}", body);
                 // let mut stream = TcpStream::connect("39.96.250.224:80").expect("Could not connect to server");

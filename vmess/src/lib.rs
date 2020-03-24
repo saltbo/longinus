@@ -1,6 +1,7 @@
 mod vmess;
 mod session;
 mod validator;
+mod address;
 
 pub use vmess::*;
 
@@ -17,3 +18,4 @@ pub fn parse_uid(x: &str) -> Option<[u8; 16]> {
     let list: Vec<_> = (0..32).step_by(2).map(|i| u8::from_str_radix(&x[i..i+2], 16).unwrap()).collect();
     list.get(0..16).map(|x| [0; 16].apply(|buf| buf.copy_from_slice(x)))
 }
+
