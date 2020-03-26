@@ -1,16 +1,20 @@
 use std::thread;
-use crate::session::{ServerSession, RequestHeader};
-use crate::validator::TimedUserValidator;
-
 use std::sync::{Mutex, Arc};
 use std::time::Duration;
-use std::io::BufReader;
+use std::io::{BufReader, Read};
 use bytes::buf::ext::Reader;
+
+use crate::session::{ServerSession};
+use crate::validator::TimedUserValidator;
+use std::net::TcpStream;
+use bytes::{Bytes};
 
 
 pub struct Vmess {
     clients: Arc<Mutex<TimedUserValidator>>
 }
+
+type FnRequest = fn(addr: String, body: Vec<u8>) -> Result<BufReader<TcpStream>, &'static str>;
 
 impl Vmess {
     pub fn new() -> Vmess {
@@ -30,16 +34,30 @@ impl Vmess {
         }
     }
 
-    pub fn decode(&self, mut reader: Reader<bytes::Bytes>) {
+    pub fn process(&self, mut reader: Reader<bytes::Bytes>, request: FnRequest) -> Result<Bytes, &str> {
         let mut srv_session = ServerSession::new(&self.clients);
-        let request = srv_session.decode_request_header(&mut reader);
-        if request.is_err() {
-            println!("err: {:?}", request.err().unwrap());
-            return;
+        let result = srv_session.decode_request_header(&mut reader);
+        if result.is_err() {
+            println!("{:?}", result.err().unwrap());
+            return Err("aaa");
         }
-        let req = request.ok();
 
+        let req = result.ok().unwrap();
         let body = srv_session.decode_request_body(&mut reader);
+
+        let send_response = request(req.address, body);
+        if send_response.is_err() {
+            return Err("123");
+        }
+
+        let mut buffer: Vec<u8> = Vec::new();
+        let mut reader = send_response.ok().unwrap();
+        reader.read_to_end(&mut buffer);
+        println!("buffer len: {:?}", buffer.len());
+        println!("buffer: {:?}", String::from_utf8_lossy(&buffer));
+
+        let encode_response = srv_session.encode_response_body(&buffer);
+        Ok(Bytes::from(encode_response))
     }
 
     pub fn encrypt() {
@@ -60,6 +78,4 @@ impl Vmess {
         // AES128CFB::new(key, iv).decode(&mut data);
         // println!("{:?}", data.to_vec());
     }
-
-    pub fn dencrypt() {}
 }

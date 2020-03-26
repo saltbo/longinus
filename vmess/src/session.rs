@@ -27,11 +27,36 @@ const REQ_CMD_MUX: RequestCommand = 0x03;
 pub struct RequestHeader {
     version: u8,
     pub command: RequestCommand,
-    option: u8,
-    security: i32,
-    port: u16,
-    // Address  net.Address
+    pub option: u8,
+    pub security: i32,
+    pub address: String,
     // User: MemoryUser,
+}
+
+impl RequestHeader {
+    pub fn new(version: u8) -> Self {
+        RequestHeader {
+            version,
+            command: 0,
+            option: 0,
+            security: 0,
+            address: String::new(),
+        }
+    }
+}
+
+struct ResponseCommand {
+    host: String,
+    port: u16,
+    id: String,
+    level: u32,
+    alter_ids: u16,
+    valid_min: u8,
+}
+
+pub struct ResponseHeader {
+    option: u8,
+    command: ResponseCommand,
 }
 
 
@@ -86,15 +111,13 @@ impl<'a> ServerSession<'a> {
         let mut aescfb = AES128CFB::new(header_key, header_iv);
         let decryptor = self.decrypt(reader, &mut aescfb, 42);
 
-        let mut request = RequestHeader {
-            version: *decryptor.get(0).unwrap(),
-            command: REQ_CMD_TCP,
-            option: 0,
-            security: 0,
-            port: 0,
-        };
+        let mut request = RequestHeader::new(*decryptor.get(0).unwrap());
         self.request_body_iv.copy_from_slice(decryptor.get(1..17).unwrap());
         self.request_body_key.copy_from_slice(decryptor.get(17..33).unwrap());
+        self.response_header = *decryptor.get(33).unwrap();
+        println!("request_body_iv: {:?}", self.request_body_iv);
+        println!("request_body_key:{:?}", self.request_body_key);
+        println!("response_header:{:?}", self.response_header);
 
         request.option = *decryptor.get(34).unwrap();
         let padding_len = decryptor.get(35).unwrap() >> 4 as i32;
@@ -103,23 +126,22 @@ impl<'a> ServerSession<'a> {
         match request.command {
             REQ_CMD_MUX => {
                 // request.Address = net.DomainAddress("v1.mux.cool");
-                request.port = 0
             }
             REQ_CMD_TCP | REQ_CMD_UDP => {
                 // addrParser.ReadAddressPort(buffer, decryptor)
+                let port = decryptor.get(39).unwrap();
+
+                let port_type = *decryptor.get(40).unwrap();
+                println!("port_type:{:?}", port_type);
+                let addr_len = *decryptor.get(41).unwrap() as u64;
+                println!("addr_len:{:?}", addr_len);
+
+                let addr = String::from_utf8(self.decrypt(reader, &mut aescfb, addr_len)).unwrap();
+                request.address = addr + ":" + port.to_string().as_str();
+                println!("{:?}", request);
             }
             _ => {}
         }
-        request.port = *decryptor.get(39).unwrap() as u16;
-        println!("{:?}", request);
-        let port_type = *decryptor.get(40).unwrap();
-        println!("{:?}", port_type);
-
-        let addr_len = *decryptor.get(41).unwrap() as u64;
-        println!("{:?}", addr_len);
-
-        let addr = self.decrypt(reader, &mut aescfb, addr_len);
-        println!("addr: {:?}", addr);
 
         if padding_len > 0 {
             self.decrypt(reader, &mut aescfb, padding_len as u64);
@@ -137,14 +159,71 @@ impl<'a> ServerSession<'a> {
         Ok(request)
     }
 
-    pub fn decode_request_body(&self, reader: &mut Reader<bytes::Bytes>) -> Vec<u8> {
-        let mut len: Vec<u8> = Vec::with_capacity(2);
-        reader.take(2).read_to_end(&mut len);
+    pub fn decode_request_body(&mut self, reader: &mut Reader<bytes::Bytes>) -> Vec<u8> {
+        let mut len = [0u8; 2];
+        reader.take(2).read(&mut len);
+        println!("len: {:?}", len);
+        self.decode_data_length(len);
+        println!("len: {:?}", u16::from_be_bytes(len));
 
         let mut buf = Vec::new();
         reader.read_to_end(&mut buf);
         println!("len: {:?}, data: {:?}", buf.len(), String::from_utf8_lossy(buf.as_slice()));
         return buf;
+    }
+
+    pub fn encode_response_header(&mut self) -> Vec<u8> {
+        let response = ResponseHeader {
+            option: 0,
+            command: ResponseCommand {
+                host: "".to_string(),
+                port: 0,
+                id: "".to_string(),
+                level: 0,
+                alter_ids: 0,
+                valid_min: 0,
+            },
+        };
+        self.response_body_iv = md5!(&self.request_body_iv);
+        self.response_body_key = md5!(&self.request_body_key);
+
+        let mut aescfb = AES128CFB::new(self.response_body_key, self.response_body_iv);
+        let mut header = vec![self.response_header, response.option, 0x00, 0x00];
+        println!("plain header: {:?}", header);
+        aescfb.encode(&mut header);
+        println!("encode header: {:?}", header.to_vec());
+        header
+    }
+
+    pub fn encode_response_body(&mut self, buffer: &[u8]) -> Vec<u8> {
+        let header = self.encode_response_header();
+        let length = self.encode_data_length(buffer.len() as u16);
+
+        let mut encode_response_body = Vec::new();
+        encode_response_body.extend_from_slice(&header);
+        encode_response_body.extend_from_slice(&length);
+        encode_response_body.extend_from_slice(&buffer);
+        println!("encode_response_body: {:?}", encode_response_body);
+        encode_response_body
+    }
+
+    fn next(&self, nonce: &[u8]) -> u16 {
+        let mut out = [0u8; 2];
+        let mut shake = crypto::sha3::Sha3::shake_128();
+        shake.input(&nonce);
+        shake.result(&mut out);
+        u16::from_be_bytes(out)
+    }
+
+    pub fn encode_data_length(&mut self, size: u16) -> [u8; 2] {
+        let mask = self.next(&self.response_body_iv);
+        (mask ^ size).to_be_bytes()
+    }
+
+    pub fn decode_data_length(&mut self, l: [u8; 2]) -> u16 {
+        let mask = self.next(&self.request_body_iv);
+        let size = u16::from_be_bytes(l);
+        mask ^ size
     }
 }
 

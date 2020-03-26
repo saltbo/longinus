@@ -4,13 +4,10 @@ use actix::prelude::*;
 use actix_files as fs;
 use actix_web::{middleware, web, App, Error, HttpRequest, HttpResponse, HttpServer};
 use actix_web_actors::ws;
-use actix_web::client::Client;
 
-use std::thread;
 use vmess::Vmess;
-use std::net::TcpStream;
-use std::io::{Write, BufReader, BufRead, Read, Take};
-use bytes::Bytes;
+use std::net::{TcpStream};
+use std::io::{Write, BufReader};
 use bytes::buf::BufExt;
 
 extern crate timer;
@@ -67,24 +64,23 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for MyWebSocket {
             }
             Ok(ws::Message::Text(text)) => ctx.text(text),
             Ok(ws::Message::Binary(bin)) => {
-                self.vmess.decode(bin.reader());
+                fn request(addr: String, body: Vec<u8>) -> Result<BufReader<TcpStream>, &'static str> {
+                    // send to dest server.
+                    let mut stream = TcpStream::connect(addr).expect("Could not connect to server");
+                    stream.write(&body.to_vec()).expect("Failed to write to server");
+                    Ok(BufReader::new(stream))
+                }
 
-                // println!("{:?}", body);
-                // let mut stream = TcpStream::connect("39.96.250.224:80").expect("Could not connect to server");
-                // stream.write(&body.to_vec()).expect("Failed to write to server");
-                //
-                // let mut reader = BufReader::new(&stream);
-                // let mut buffer: Vec<u8> = Vec::new();
-                // reader.read_to_end(&mut buffer)
-                //     .expect("Could not read into buffer");
-                // print!(
-                //     "{}",
-                //     String::from_utf8(buffer).expect("Could not write buffer as string")
-                // );
+                let abc = bin.clone();
 
-                // let rb =  EncodeResponseBody
+                let dr = self.vmess.process(bin.reader(), request);
+                if dr.is_err() {
+                    println!("{:?}", dr.err());
+                    ctx.binary(abc);
+                    return;
+                }
 
-                ctx.binary("")
+                ctx.binary(dr.unwrap())
             }
             Ok(ws::Message::Close(_)) => {
                 ctx.stop();

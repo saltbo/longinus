@@ -4,6 +4,7 @@ mod validator;
 mod address;
 
 pub use vmess::*;
+pub use session::RequestHeader;
 
 pub trait SizedMonadExt: Sized {
     fn apply<F: FnOnce(&mut Self)>(mut self, f: F) -> Self {
