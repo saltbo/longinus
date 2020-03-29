@@ -100,7 +100,7 @@ impl<'a> ServerSession<'a> {
 
         let (user, timestamp) = match self.user_validator.lock().unwrap().get(key) {
             None => return Err("invalid user"),
-            Some((mem_user, timestamp)) => (*mem_user, timestamp),
+            Some((mem_user, timestamp)) => (mem_user.clone(), timestamp),
         };
         println!("Successful logon!");
 
@@ -149,6 +149,8 @@ impl<'a> ServerSession<'a> {
 
         let expectedHash = self.decrypt(reader, &mut aescfb, 4);
         println!("expectedHash: {:?}", expectedHash);
+        decryptor.get(..decryptor.len()-4);
+
 
         // let actualHash = "";
         // let expectedHash = decryptor.get(58 + *addr_len + padding_len..58 + *addr_len + padding_len + 4);
@@ -227,6 +229,16 @@ impl<'a> ServerSession<'a> {
     }
 }
 
+#[allow(clippy::unreadable_literal)]
+fn fnv1a(x: &[u8]) -> u32 {
+    let prime = 16777619;
+    let mut hash = 0x811c9dc5;
+    for byte in x.iter() {
+        hash ^= *byte as u32;
+        hash = hash.wrapping_mul(prime);
+    }
+    hash
+}
 
 // aes-128-cfb
 #[derive(Debug)]
