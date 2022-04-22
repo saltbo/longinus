@@ -10,5 +10,3 @@ edition = "2018"
 hex = "0.4.2"
 bytes = "0.5.3"
 rust-crypto = "0.2"
-
-oh-my-rust = { git = "https://github.com/ylxdzsw/oh-my-rust" }

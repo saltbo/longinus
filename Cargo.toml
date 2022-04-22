@@ -21,4 +21,4 @@ timer = "0.2.0"
 chrono = "0.4.11"
 openssl = { version = "0.10", features = ["v110"] }
 
-vmess = { path = "./vmess", version = "" }
+vmess = { path = "./vmess", version = "0.1.0" }
